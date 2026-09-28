@@ -210,7 +210,7 @@ def process(cur, msg_id, chat_id, text, token):
         day_cal, day_p = cur.fetchone()
         tail = ""
         if goal and goal[0]:
-            tail = f" {max(0, round(goal[0]-float(day_cal)))} kcal left today."
+            tail = f" {max(0, round(float(goal[0])-float(day_cal)))} kcal left today."
         reply(chat_id, f"Logged: {', '.join(logged)}. "
                        f"Today {round(float(day_cal))} kcal / {round(float(day_p))}g protein.{tail}", token)
     elif not parsed.get("mentioned_lifting"):
