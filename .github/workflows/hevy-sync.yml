@@ -1,0 +1,31 @@
+name: Hevy -> Supabase sync
+
+# Cloud cron. Your laptop can be off. Missed runs are caught up automatically
+# because the sync polls /workouts/events?since=<last sync>.
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 min (GitHub may delay a few min under load)
+  workflow_dispatch:          # lets you run it by hand from the Actions tab
+
+# Prevent overlapping runs (a slow run + the next tick).
+concurrency:
+  group: hevy-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run sync
+        env:
+          HEVY_API_KEY: ${{ secrets.HEVY_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python scripts/hevy_sync.py
