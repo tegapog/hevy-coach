@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS workouts (
   session_date date,
   split text,
   duration_min int,
-  bodyweight_lbs numeric,
+  bodyweight_kg numeric,
   message_id bigint REFERENCES messages(id),
   hevy_id text UNIQUE                    -- [HEVY] Hevy workout uuid, for idempotent upsert/delete
 );
@@ -74,11 +74,11 @@ CREATE TABLE IF NOT EXISTS workout_sets (
   workout_id bigint REFERENCES workouts(id) ON DELETE CASCADE,  -- [HEVY] cascade so a deleted workout takes its sets
   exercise_id bigint REFERENCES exercises(id),
   set_index int,
-  weight_lbs numeric,
+  weight_kg numeric,
   reps int,
   rir int,
   -- 30.0 (not 30) so integer division never silently returns your bench as your 1RM:
-  e1rm numeric GENERATED ALWAYS AS (weight_lbs * (1 + reps / 30.0)) STORED
+  e1rm numeric GENERATED ALWAYS AS (weight_kg * (1 + reps / 30.0)) STORED
 );
 
 CREATE TABLE IF NOT EXISTS supplements (
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS supplement_log (
 
 CREATE TABLE IF NOT EXISTS body_metrics (
   id bigserial PRIMARY KEY,
-  weight_lbs numeric,
+  weight_kg numeric,
   bodyfat_pct numeric,
   waist_in numeric,
   resting_hr int,
@@ -129,9 +129,9 @@ CREATE TABLE IF NOT EXISTS sync_state (
 );
 
 -- ---------- your goal rows (from what your coach already knows; edit if wrong) ----------
--- weight_rate is in lb/week: cutting ~0.45 kg/wk = about -1.0 lb/wk.
+-- weight_rate is in kg/week: cutting ~0.45 kg/wk.
 INSERT INTO daily_plan (item_type, label, target_value, target_unit)
-VALUES ('goal', 'weight_rate', -1.0, 'lb_per_week')
+VALUES ('goal', 'weight_rate', -0.45, 'kg_per_week')
 ON CONFLICT DO NOTHING;
 INSERT INTO daily_plan (item_type, label, target_value, target_unit)
 VALUES ('goal', 'calories', 2265, 'kcal')

@@ -4,7 +4,7 @@ Nutrition coach (guide STEP 4), adapted to Supabase + Telegram.
 7 days of macros vs where bodyweight is actually heading, and ONE change for
 tomorrow. Reads food_log / body_metrics / daily_plan. Faithful to the prompt:
 - <5 weigh-ins in 14 days -> skip the rate trend and say so.
-- protein floor 0.8 g/lb of most recent bodyweight; a day with no food_log is
+- protein floor 1.6 g/kg of most recent bodyweight; a day with no food_log is
   "not covered", not "under the floor".
 - if <4 of the last 7 days have any food_log, say so and prescribe nothing.
 """
@@ -25,15 +25,15 @@ def main():
         """, (TODAY - dt.timedelta(days=7), TODAY - dt.timedelta(days=1)))
         days = {r[0]: r[1:] for r in cur.fetchall()}
 
-        cur.execute("""SELECT recorded_at::date, weight_lbs FROM body_metrics
-                       WHERE weight_lbs IS NOT NULL AND recorded_at::date >= %s ORDER BY 1""",
+        cur.execute("""SELECT recorded_at::date, weight_kg FROM body_metrics
+                       WHERE weight_kg IS NOT NULL AND recorded_at::date >= %s ORDER BY 1""",
                     (TODAY - dt.timedelta(days=14),))
         # keep latest weigh-in per day
         bw = {}
         for d, w in cur.fetchall():
             bw[d] = float(w)
 
-        cur.execute("SELECT weight_lbs FROM body_metrics WHERE weight_lbs IS NOT NULL ORDER BY recorded_at DESC LIMIT 1")
+        cur.execute("SELECT weight_kg FROM body_metrics WHERE weight_kg IS NOT NULL ORDER BY recorded_at DESC LIMIT 1")
         r = cur.fetchone()
         cur_bw = float(r[0]) if r else None
 
@@ -54,19 +54,19 @@ def main():
     if len(bw) >= 5:
         slope_wk = cc.lin_slope_per_week(list(bw.keys()), list(bw.values()))
         goal_rate = goals.get("weight_rate")
-        rate_txt = f"Weight trend {slope_wk:+.2f} lb/wk"
+        rate_txt = f"Weight trend {slope_wk:+.2f} kg/wk"
         if goal_rate is not None:
-            if slope_wk > goal_rate + 0.2:
-                rate_txt += f" (faster than target {goal_rate:+.1f} — you can eat a bit more)"
-            elif slope_wk < goal_rate - 0.2:
-                rate_txt += f" (slower than target {goal_rate:+.1f} — tighten intake)"
+            if slope_wk > goal_rate + 0.1:
+                rate_txt += f" (faster than target {goal_rate:+.2f} — you can eat a bit more)"
+            elif slope_wk < goal_rate - 0.1:
+                rate_txt += f" (slower than target {goal_rate:+.2f} — tighten intake)"
             else:
                 rate_txt += f" (on target {goal_rate:+.1f})"
     else:
         rate_txt = f"Weight trend: need 5+ weigh-ins in 14 days (have {len(bw)})."
 
     # protein floor
-    floor = 0.8 * cur_bw if cur_bw else None
+    floor = 1.6 * cur_bw if cur_bw else None
     under_floor = 0
     if floor:
         for d, vals in days.items():

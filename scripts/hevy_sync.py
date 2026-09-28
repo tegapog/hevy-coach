@@ -5,8 +5,8 @@ Polls GET /workouts/events?since=<last sync> and upserts changed workouts into
 the guide's Postgres schema. Replaces the Telegram ingest+parse (STEP 2/3) for
 WORKOUTS only. Food/supplements still come from Telegram.
 
-Mappings (Hevy -> guide's lbs-based schema):
-  weight_kg -> weight_lbs   (kg / 0.45359237)   so e1RM + coach "+5 lbs" logic stay valid
+Mappings (Hevy -> Supabase, metric):
+  weight_kg -> weight_kg    (stored as-is; e1RM is computed in kg by the DB)
   rpe (0-10) -> rir         (rir = 10 - rpe, floored at 0; null if no RPE)
   warmup sets               -> skipped (don't pollute e1RM slopes)
   exercise                  -> one of 8 patterns the training coach groups by
@@ -87,10 +87,6 @@ def api(path, params=None, retries=4):
 
 
 # ---------------------------------------------------------------- conversions
-def kg_to_lb(kg):
-    return None if kg is None else round(kg / LB_PER_KG, 4)
-
-
 def rpe_to_rir(rpe):
     if rpe is None:
         return None
@@ -185,9 +181,9 @@ def ensure_exercise(cur, template_id, title):
     return cur.fetchone()[0]
 
 
-def latest_bodyweight_lbs(cur, on_or_before):
-    cur.execute("""SELECT weight_lbs FROM body_metrics
-                   WHERE weight_lbs IS NOT NULL AND recorded_at::date <= %s
+def latest_bodyweight_kg(cur, on_or_before):
+    cur.execute("""SELECT weight_kg FROM body_metrics
+                   WHERE weight_kg IS NOT NULL AND recorded_at::date <= %s
                    ORDER BY recorded_at DESC LIMIT 1""", (on_or_before,))
     row = cur.fetchone()
     return row[0] if row else None
@@ -202,14 +198,14 @@ def upsert_workout(cur, w):
     end = parse_ts(w["end_time"]) if w.get("end_time") else None
     session_date = start.date()
     duration_min = int((end - start).total_seconds() // 60) if end else None
-    bodyweight = latest_bodyweight_lbs(cur, session_date)
+    bodyweight = latest_bodyweight_kg(cur, session_date)
 
     cur.execute("""
-        INSERT INTO workouts (session_date, split, duration_min, bodyweight_lbs, hevy_id)
+        INSERT INTO workouts (session_date, split, duration_min, bodyweight_kg, hevy_id)
         VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (hevy_id) DO UPDATE
           SET session_date=EXCLUDED.session_date, split=EXCLUDED.split,
-              duration_min=EXCLUDED.duration_min, bodyweight_lbs=EXCLUDED.bodyweight_lbs
+              duration_min=EXCLUDED.duration_min, bodyweight_kg=EXCLUDED.bodyweight_kg
         RETURNING id
     """, (session_date, w.get("title"), duration_min, bodyweight, w["id"]))
     workout_id = cur.fetchone()[0]
@@ -224,13 +220,13 @@ def upsert_workout(cur, w):
         for s in ex.get("sets", []):
             if s.get("type") == "warmup":
                 continue
-            weight_lbs = kg_to_lb(s.get("weight_kg"))
+            weight_kg = s.get("weight_kg")
             reps = s.get("reps")
             rir = rpe_to_rir(s.get("rpe"))
             cur.execute("""
-                INSERT INTO workout_sets (workout_id, exercise_id, set_index, weight_lbs, reps, rir)
+                INSERT INTO workout_sets (workout_id, exercise_id, set_index, weight_kg, reps, rir)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (workout_id, ex_id, idx, weight_lbs, reps, rir))
+            """, (workout_id, ex_id, idx, weight_kg, reps, rir))
             idx += 1
             n_sets += 1
     return n_sets
@@ -250,11 +246,11 @@ def sync_body_measurements(cur):
         for bm in resp.get("body_measurements", []):
             recorded = bm.get("created_at") or (bm.get("date") + "T12:00:00Z")
             cur.execute("""
-                INSERT INTO body_metrics (weight_lbs, recorded_at, hevy_measurement_id)
+                INSERT INTO body_metrics (weight_kg, recorded_at, hevy_measurement_id)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (hevy_measurement_id) DO UPDATE
-                  SET weight_lbs=EXCLUDED.weight_lbs, recorded_at=EXCLUDED.recorded_at
-            """, (kg_to_lb(bm.get("weight_kg")), recorded, bm.get("id")))
+                  SET weight_kg=EXCLUDED.weight_kg, recorded_at=EXCLUDED.recorded_at
+            """, (bm.get("weight_kg"), recorded, bm.get("id")))
             n += 1
         page += 1
     return n

@@ -9,7 +9,7 @@ can be off. The three coaches from the guide read the same database.
 
 ## What the sync does
 - Pulls only what changed (`GET /workouts/events?since=<last sync>`).
-- Converts **kg → lbs** (the schema + coaches are lbs-based).
+- Stores weights in **kg** (metric throughout); e1RM is computed in kg.
 - Converts **RPE → RIR** (`rir = 10 − rpe`).
 - Skips **warmup** sets so e1RM trends stay clean.
 - Classifies each exercise into the coach's 8 movement patterns.

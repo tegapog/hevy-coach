@@ -51,10 +51,25 @@ def http_json(url, data=None, headers=None, method=None, timeout=60):
         return 0, {"error": str(e)}
 
 
+def target_chat_id():
+    """Guide's source of truth: the chat_id on the most recent Telegram message you
+    sent the bot. Falls back to TELEGRAM_CHAT_ID. This self-heals a wrong secret."""
+    try:
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("SELECT chat_id FROM messages WHERE source='telegram' AND chat_id IS NOT NULL "
+                        "ORDER BY received_at DESC LIMIT 1")
+            r = cur.fetchone()
+            if r and r[0]:
+                return str(r[0])
+    except Exception:
+        pass
+    return cfg("TELEGRAM_CHAT_ID")
+
+
 def tg_send(text):
     """Send a Telegram message. If creds are missing, print instead (so dry-runs still work)."""
     token = cfg("TELEGRAM_BOT_TOKEN")
-    chat = cfg("TELEGRAM_CHAT_ID")
+    chat = target_chat_id()
     if not token or not chat:
         print("[no telegram creds — message below]\n" + text)
         return False

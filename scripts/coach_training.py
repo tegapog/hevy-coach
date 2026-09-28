@@ -9,7 +9,7 @@ on a bar), and use the exercise's pattern only to decide the load increment
 
 Your data has no RIR (Hevy RPE not logged) -> rising lifts get "repeat exactly",
 which is exactly the prompt's null-RIR branch. Log RPE in Hevy to unlock auto-loading.
-Weights are lbs (the sync converts kg->lbs), matching the prompt.
+Weights are in kg throughout (matching Hevy).
 """
 import datetime as dt
 from collections import defaultdict
@@ -24,7 +24,7 @@ MIN_SESSIONS = 3
 
 
 def r1(x):
-    return None if x is None else round(x)
+    return None if x is None else round(x, 1)
 
 
 def fetch(cur):
@@ -37,7 +37,7 @@ def fetch(cur):
         WHERE ws.e1rm IS NOT NULL AND w.session_date >= %s
         GROUP BY e.id, e.name, e.pattern, w.session_date
         ORDER BY e.id, w.session_date
-    """, (since,))
+    """, (since,))  # e1rm is in kg
     series = defaultdict(lambda: {"name": None, "pattern": None, "pts": []})
     for eid, name, pat, d, e1 in cur.fetchall():
         series[eid]["name"] = name
@@ -51,7 +51,7 @@ def fetch(cur):
           FROM workout_sets ws JOIN workouts w ON w.id = ws.workout_id
           GROUP BY ws.exercise_id
         )
-        SELECT ws.exercise_id, l.d, ws.weight_lbs::float, ws.reps, ws.rir
+        SELECT ws.exercise_id, l.d, ws.weight_kg::float, ws.reps, ws.rir
         FROM latest l
         JOIN workouts w ON w.session_date = l.d
         JOIN workout_sets ws ON ws.workout_id = w.id AND ws.exercise_id = l.exercise_id
@@ -62,8 +62,8 @@ def fetch(cur):
         last[eid]["date"] = d
         last[eid]["sets"].append({"weight": wt, "reps": reps, "rir": rir})
 
-    cur.execute("""SELECT recorded_at::date, weight_lbs::float FROM body_metrics
-                   WHERE weight_lbs IS NOT NULL AND recorded_at::date >= %s ORDER BY 1""", (since,))
+    cur.execute("""SELECT recorded_at::date, weight_kg::float FROM body_metrics
+                   WHERE weight_kg IS NOT NULL AND recorded_at::date >= %s ORDER BY 1""", (since,))
     bw = cur.fetchall()
     cur.execute("SELECT DISTINCT session_date FROM workouts ORDER BY 1")
     sessions = [r[0] for r in cur.fetchall()]
@@ -80,21 +80,21 @@ def prescribe(pattern, slope_wk, last_sets, bw_slope_wk):
     n_sets = len(last_sets)
     top = max(last_sets, key=lambda s: (s["weight"] or 0))
     load, reps, last_rir = top["weight"], top["reps"], last_sets[-1]["rir"]
-    inc = 5 if pattern in COMPOUND_PATTERNS else 2.5
+    inc = 2.5 if pattern in COMPOUND_PATTERNS else 1.25
     stalled = slope_wk is not None and slope_wk <= 0
     rising = slope_wk is not None and slope_wk > 0
 
     if slope_wk is not None and load and slope_wk < -0.02 * load:
-        return f"deload to {r1(load*0.9)} lb, repeat 2 sessions", (n_sets, reps, r1(load*0.9))
+        return f"deload to {r1(load*0.9)} kg, repeat 2 sessions", (n_sets, reps, r1(load*0.9))
     if stalled:
-        if bw_slope_wk is not None and bw_slope_wk < -0.3:
+        if bw_slope_wk is not None and bw_slope_wk < -0.15:
             return "hold — stall is a food problem (bodyweight falling), fix nutrition", (n_sets, reps, r1(load))
-        return f"hold {r1(load)} lb, add 1 rep to every set", (n_sets, (reps + 1) if reps else None, r1(load))
+        return f"hold {r1(load)} kg, add 1 rep to every set", (n_sets, (reps + 1) if reps else None, r1(load))
     if rising:
         if last_rir is not None and last_rir >= 2:
-            return f"add {inc} lb -> {r1((load or 0)+inc)} lb", (n_sets, reps, r1((load or 0)+inc))
-        return f"repeat {r1(load)} lb exactly (log RPE to unlock +load)", (n_sets, reps, r1(load))
-    return f"keep at {r1(load)} lb", (n_sets, reps, r1(load))
+            return f"add {inc} kg -> {r1((load or 0)+inc)} kg", (n_sets, reps, r1((load or 0)+inc))
+        return f"repeat {r1(load)} kg exactly (log RPE to unlock +load)", (n_sets, reps, r1(load))
+    return f"keep at {r1(load)} kg", (n_sets, reps, r1(load))
 
 
 def main():
@@ -119,10 +119,10 @@ def main():
         slope = cc.lin_slope_per_week(dates, [v for _, v in s["pts"]])
         best = max(v for _, v in s["pts"])
         action, (ns, reps, load) = prescribe(s["pattern"], slope, last[eid]["sets"], bw_slope)
-        trend = f"{'+' if slope >= 0 else ''}{slope:.1f} lb/wk"
-        rx = f"{ns}×{reps} @ {load} lb" if load else f"{ns}×{reps}"
+        trend = f"{'+' if slope >= 0 else ''}{slope:.1f} kg/wk"
+        rx = f"{ns}×{reps} @ {load} kg" if load else f"{ns}×{reps}"
         lines.append((last[eid]["date"], s["name"],
-                      f"• <b>{s['name']}</b>: {rx}  (e1RM {best:.0f}, {trend}) → {action}"))
+                      f"• <b>{s['name']}</b>: {rx}  (e1RM {best:.1f} kg, {trend}) → {action}"))
 
     lines.sort(key=lambda t: (t[0], t[1]), reverse=True)
     header = f"🏋️ <b>Training coach</b> — {TODAY:%a %d %b}"

@@ -78,11 +78,12 @@ def transcribe(audio_bytes):
 PARSE_PROMPT = """You extract a fitness log from one message. Return ONLY JSON:
 {"foods":[{"name":"","brand":"","grams":0}],
  "supplements":[{"name":"","quantity":1}],
- "body":{"weight_lbs":null,"bodyfat_pct":null,"waist_in":null,"resting_hr":null},
+ "body":{"weight_kg":null,"bodyfat_pct":null,"waist_in":null,"resting_hr":null},
  "mentioned_food":false,"mentioned_lifting":false}
 Rules: lower-case names. Estimate grams for each food from the text (e.g. "2 eggs"~100,
-"30g whey"=30). If you cannot estimate grams, use 0. Convert any bodyweight to POUNDS
-(1 kg = 2.20462 lb). Never invent numbers not implied. Empty arrays where nothing applies.
+"30g whey"=30). If you cannot estimate grams, use 0. Bodyweight in KILOGRAMS
+(if stated in lb, convert: 1 lb = 0.453592 kg). Never invent numbers not implied.
+Empty arrays where nothing applies.
 Message: """
 
 
@@ -189,10 +190,10 @@ def process(cur, msg_id, chat_id, text, token):
         logged.append(sup.get("name", "supplement"))
 
     b = parsed.get("body") or {}
-    if any(b.get(k) is not None for k in ("weight_lbs", "bodyfat_pct", "waist_in", "resting_hr")):
-        cur.execute("""INSERT INTO body_metrics (weight_lbs, bodyfat_pct, waist_in, resting_hr, recorded_at, message_id)
+    if any(b.get(k) is not None for k in ("weight_kg", "bodyfat_pct", "waist_in", "resting_hr")):
+        cur.execute("""INSERT INTO body_metrics (weight_kg, bodyfat_pct, waist_in, resting_hr, recorded_at, message_id)
                        VALUES (%s,%s,%s,%s, now(), %s)""",
-                    (b.get("weight_lbs"), b.get("bodyfat_pct"), b.get("waist_in"), b.get("resting_hr"), msg_id))
+                    (b.get("weight_kg"), b.get("bodyfat_pct"), b.get("waist_in"), b.get("resting_hr"), msg_id))
         logged.append("bodyweight")
 
     if parsed.get("mentioned_lifting") and not parsed.get("foods"):
