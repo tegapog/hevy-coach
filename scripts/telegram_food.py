@@ -170,9 +170,9 @@ def process(cur, msg_id, chat_id, text, token):
             review = True
             continue
         fid, cal, p, cbs, fat = food
-        s = grams / 100.0
-        cal_l, p_l, c_l, f_l = (round((cal or 0)*s, 1), round((p or 0)*s, 1),
-                                round((cbs or 0)*s, 1), round((fat or 0)*s, 1))
+        s = float(grams) / 100.0
+        cal_l, p_l, c_l, f_l = (round(float(cal or 0)*s, 1), round(float(p or 0)*s, 1),
+                                round(float(cbs or 0)*s, 1), round(float(fat or 0)*s, 1))
         cur.execute("""INSERT INTO food_log (food_id, quantity, calories, protein_g, carbs_g, fat_g, consumed_at, message_id)
                        VALUES (%s,%s,%s,%s,%s,%s, now(), %s)""",
                     (fid, grams, cal_l, p_l, c_l, f_l, msg_id))
