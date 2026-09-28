@@ -79,7 +79,10 @@ PARSE_PROMPT = """You extract a fitness log from one message. Return ONLY JSON:
 {"foods":[{"name":"","brand":"","grams":0}],
  "supplements":[{"name":"","quantity":1}],
  "body":{"weight_kg":null,"bodyfat_pct":null,"waist_in":null,"resting_hr":null},
+ "question":"",
  "mentioned_food":false,"mentioned_lifting":false}
+If the message asks something (progress, what to lift, advice, "how's my ...?"),
+put the question in "question"; else leave it "".
 Rules: lower-case names. Estimate grams for each food from the text (e.g. "2 eggs"~100,
 "30g whey"=30). If you cannot estimate grams, use 0. Bodyweight in KILOGRAMS
 (if stated in lb, convert: 1 lb = 0.453592 kg). Never invent numbers not implied.
@@ -196,7 +199,13 @@ def process(cur, msg_id, chat_id, text, token):
                     (b.get("weight_kg"), b.get("bodyfat_pct"), b.get("waist_in"), b.get("resting_hr"), msg_id))
         logged.append("bodyweight")
 
-    if parsed.get("mentioned_lifting") and not parsed.get("foods"):
+    # answer any question, grounded in their data
+    q = (parsed.get("question") or "").strip()
+    if q:
+        import coach_chat
+        reply(chat_id, coach_chat.answer(cur, q), token)
+
+    if parsed.get("mentioned_lifting") and not parsed.get("foods") and not q:
         reply(chat_id, "Log lifts in Hevy — they sync here automatically. This chat is for food, supplements & bodyweight.", token)
 
     status = "needs_review" if (review or ((parsed.get("mentioned_food")) and not logged)) else "parsed"
@@ -213,7 +222,7 @@ def process(cur, msg_id, chat_id, text, token):
             tail = f" {max(0, round(float(goal[0])-float(day_cal)))} kcal left today."
         reply(chat_id, f"Logged: {', '.join(logged)}. "
                        f"Today {round(float(day_cal))} kcal / {round(float(day_p))}g protein.{tail}", token)
-    elif not parsed.get("mentioned_lifting"):
+    elif not parsed.get("mentioned_lifting") and not q:
         reply(chat_id, "Nothing to log there.", token)
 
 
