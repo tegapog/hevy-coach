@@ -14,6 +14,7 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -22,6 +23,9 @@ jobs:
       USDA_API_KEY: ${{ secrets.USDA_API_KEY }}
       # Optional override, e.g. gemini-2.5-flash. Defaults to gemini-flash-lite-latest.
       GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+      GEMINI_CHAT_MODEL: ${{ secrets.GEMINI_CHAT_MODEL }}
+      # Hold a long-poll connection ~4.5 min so replies land in seconds (cron restarts it).
+      RUN_SECONDS: "270"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

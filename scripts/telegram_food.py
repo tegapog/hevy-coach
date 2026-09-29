@@ -16,11 +16,12 @@ Degrades gracefully: missing GROQ -> voice notes flagged needs_review; missing
 USDA -> foods flagged needs_review; missing GEMINI -> message flagged needs_review.
 """
 import json
-import mimetypes
+import time
 import uuid
 import datetime as dt
 import urllib.request
 import urllib.error
+from urllib.parse import urlencode
 import coach_common as cc
 
 TG = "https://api.telegram.org/bot{tok}/{method}"
@@ -226,58 +227,73 @@ def process(cur, msg_id, chat_id, text, token):
         reply(chat_id, "Nothing to log there.", token)
 
 
+def poll_once(cur, token, long_poll):
+    """One getUpdates batch. long_poll=seconds Telegram holds the connection open."""
+    cur.execute("SELECT value FROM sync_state WHERE key='telegram_offset'")
+    row = cur.fetchone()
+    offset = int(row[0]) if row else None
+    params = {"timeout": long_poll}
+    if offset is not None:
+        params["offset"] = offset + 1
+    st, resp = cc.http_json(TG.format(tok=token, method="getUpdates") + "?" + urlencode(params),
+                            timeout=long_poll + 15)
+    updates = resp.get("result", []) if isinstance(resp, dict) else []
+
+    processed, max_uid = 0, offset
+    for u in updates:
+        max_uid = u["update_id"]
+        m = u.get("message") or u.get("edited_message")
+        if not m:
+            continue
+        chat_id = m["chat"]["id"]
+        kind, raw_text, transcript = "text", None, None
+        if m.get("voice"):
+            audio = tg_download(m["voice"]["file_id"], token)
+            transcript = transcribe(audio) if audio else None
+            kind = "voice"
+        elif m.get("text"):
+            raw_text = m["text"]; transcript = m["text"]
+        else:
+            continue
+        status = "pending" if transcript else "needs_review"
+        cur.execute("""INSERT INTO messages (source, chat_id, kind, raw_text, transcript, status, received_at)
+                       VALUES ('telegram', %s, %s, %s, %s, %s, now()) RETURNING id""",
+                    (chat_id, kind, raw_text, transcript, status))
+        msg_id = cur.fetchone()[0]
+        reply(chat_id, "Got it…", token)
+        if not transcript:
+            reply(chat_id, "Couldn't transcribe that voice note.", token)
+            continue
+        process(cur, msg_id, chat_id, transcript, token)
+        processed += 1
+
+    if max_uid is not None:
+        cur.execute("""INSERT INTO sync_state (key, value) VALUES ('telegram_offset', %s)
+                       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""", (str(max_uid),))
+    return len(updates), processed
+
+
 def main():
     token = cc.cfg("TELEGRAM_BOT_TOKEN")
     if not token:
         print("[telegram_food] TELEGRAM_BOT_TOKEN not set — nothing to poll."); return
-    with cc.db() as conn, conn.cursor() as cur:
-        offset = cc.cfg("_") or None
-        cur.execute("SELECT value FROM sync_state WHERE key='telegram_offset'")
-        row = cur.fetchone()
-        offset = int(row[0]) if row else None
-
-        params = {"timeout": 0}
-        if offset is not None:
-            params["offset"] = offset + 1
-        from urllib.parse import urlencode
-        st, resp = cc.http_json(TG.format(tok=token, method="getUpdates") + "?" + urlencode(params))
-        updates = resp.get("result", []) if isinstance(resp, dict) else []
-
-        processed = 0
-        max_uid = offset
-        for u in updates:
-            max_uid = u["update_id"]
-            m = u.get("message") or u.get("edited_message")
-            if not m:
-                continue
-            chat_id = m["chat"]["id"]
-            kind, raw_text, transcript = "text", None, None
-            if m.get("voice"):
-                audio = tg_download(m["voice"]["file_id"], token)
-                transcript = transcribe(audio) if audio else None
-                kind = "voice"
-            elif m.get("text"):
-                raw_text = m["text"]; transcript = m["text"]
-            else:
-                continue  # ignore photos/docs for now
-
-            status = "pending" if transcript else "needs_review"
-            cur.execute("""INSERT INTO messages (source, chat_id, kind, raw_text, transcript, status, received_at)
-                           VALUES ('telegram', %s, %s, %s, %s, %s, now()) RETURNING id""",
-                        (chat_id, kind, raw_text, transcript, status))
-            msg_id = cur.fetchone()[0]
-            reply(chat_id, "Got it — logging now.", token)
-            if not transcript:
-                reply(chat_id, "Couldn't transcribe that voice note.", token)
-                continue
-            process(cur, msg_id, chat_id, transcript, token)
-            processed += 1
-
-        if max_uid is not None:
-            cur.execute("""INSERT INTO sync_state (key, value) VALUES ('telegram_offset', %s)
-                           ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""", (str(max_uid),))
-        conn.commit()
-    print(f"[telegram_food] updates={len(updates)} processed={processed}")
+    # RUN_SECONDS>0 -> keep a long-poll connection open for near-instant replies.
+    run_seconds = int(cc.cfg("RUN_SECONDS") or 0)
+    long_poll = 25 if run_seconds > 0 else 0
+    deadline = time.time() + run_seconds
+    total_u = total_p = 0
+    conn = cc.db()
+    try:
+        while True:
+            with conn.cursor() as cur:
+                nu, npr = poll_once(cur, token, long_poll)
+            conn.commit()
+            total_u += nu; total_p += npr
+            if run_seconds <= 0 or time.time() >= deadline:
+                break
+    finally:
+        conn.close()
+    print(f"[telegram_food] updates={total_u} processed={total_p} run_seconds={run_seconds}")
 
 
 if __name__ == "__main__":
